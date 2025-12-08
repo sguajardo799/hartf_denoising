@@ -13,9 +13,13 @@ class BinauralDataset(Dataset):
         target_sample_rate: int = 16000,
         max_items: int | None = None,
         auth_token: str | None = None,
+        cache_dir: str | None = None,
     ):
         super().__init__()
         self.target_sr = target_sample_rate
+        self.cache_dir = cache_dir
+        if self.cache_dir:
+            os.makedirs(self.cache_dir, exist_ok=True)
         
         # Load dataset from Hugging Face
         # Assuming the dataset has a 'split' column or we filter by it if it's a single split loaded
@@ -93,50 +97,78 @@ class BinauralDataset(Dataset):
             # Let's assume public for now or try torchaudio.load.
             # If it fails, we might need a helper.
             
-            try:
-                # Attempt direct load
-                wav, sr = torchaudio.load(url)
-            except Exception as e:
-                # Fallback: download to tmp
-                import requests
-                import tempfile
-                import shutil
+            # Check local cache
+            cache_path = None
+            if self.cache_dir:
+                # Create a safe filename from URL
+                filename = source.replace("/", "_").replace(":", "_")
+                cache_path = os.path.join(self.cache_dir, filename)
                 
-                # print(f"Direct load failed ({e}), trying download...")
-                try:
-                    with requests.get(url, stream=True) as r:
-                        r.raise_for_status()
-                        # Create temp file
-                        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
-                            shutil.copyfileobj(r.raw, tmp)
-                            tmp.flush()
-                            # Load from temp file
-                            # We need to seek to 0 if copyfileobj moved pointer? 
-                            # copyfileobj moves it.
-                            # But we are opening it again via torchaudio.load(tmp.name)
-                            # On windows/some systems opening an open file is tricky.
-                            # But delete=True means it's gone when closed.
-                            # Let's use delete=False and manual cleanup to be safe across OS/containers
-                            pass
-                        
-                    # Better approach for temp file
-                    fd, tmp_path = tempfile.mkstemp(suffix=".wav")
-                    os.close(fd)
+                if os.path.exists(cache_path):
                     try:
-                        with requests.get(url, stream=True) as r:
-                            r.raise_for_status()
-                            with open(tmp_path, 'wb') as f:
-                                for chunk in r.iter_content(chunk_size=8192): 
-                                    f.write(chunk)
+                        wav, sr = torchaudio.load(cache_path)
+                        return self._process_wav(wav, sr)
+                    except Exception as e:
+                        print(f"Error loading from cache {cache_path}: {e}. Re-downloading.")
+            
+            try:
+                # Attempt direct load (if no cache or cache failed)
+                # If we have a cache_dir, we prefer downloading to it.
+                if self.cache_dir:
+                    self._download_with_retry(url, cache_path)
+                    wav, sr = torchaudio.load(cache_path)
+                else:
+                    # Direct load from URL (no cache)
+                    # Note: torchaudio.load might fail with 429 if it uses HTTP internally without retries.
+                    # If it fails, we fall back to download with retry to a temp file.
+                    wav, sr = torchaudio.load(url)
+                    
+            except Exception as e:
+                # Fallback: download to tmp or cache with retry
+                if self.cache_dir:
+                     # We already tried downloading to cache above if cache_dir was set.
+                     # If we are here, it means _download_with_retry failed or torchaudio.load(cache_path) failed.
+                     # If _download_with_retry failed, it raised exception.
+                     # So we probably won't reach here if cache_dir is set, unless direct load was attempted (logic above).
+                     # Let's refine the logic.
+                     pass
+                
+                # If no cache dir, use temp file
+                import tempfile
+                fd, tmp_path = tempfile.mkstemp(suffix=".wav")
+                os.close(fd)
+                try:
+                    self._download_with_retry(url, tmp_path)
+                    wav, sr = torchaudio.load(tmp_path)
+                finally:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
                         
-                        wav, sr = torchaudio.load(tmp_path)
-                    finally:
-                        if os.path.exists(tmp_path):
-                            os.remove(tmp_path)
-                            
-                except Exception as dl_e:
-                    print(f"Download failed for {url}: {dl_e}")
-                    raise dl_e
+    def _download_with_retry(self, url, dest_path):
+        import requests
+        import time
+        
+        max_retries = 5
+        backoff_factor = 1.0
+        
+        for i in range(max_retries):
+            try:
+                with requests.get(url, stream=True) as r:
+                    if r.status_code == 429:
+                        raise requests.exceptions.RequestException("Too Many Requests")
+                    r.raise_for_status()
+                    with open(dest_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192): 
+                            f.write(chunk)
+                return # Success
+            except Exception as e:
+                if i == max_retries - 1:
+                    print(f"Download failed for {url} after {max_retries} attempts: {e}")
+                    raise e
+                
+                wait_time = backoff_factor * (2 ** i)
+                # print(f"Download failed ({e}), retrying in {wait_time}s...")
+                time.sleep(wait_time)
                 
         elif isinstance(source, dict) and "array" in source:
              # If we fell back to standard load_dataset, it returns dict
@@ -181,18 +213,22 @@ def get_data_splits(config):
     # We instantiate the dataset twice, one for train, one for val
     # The class handles filtering by split
     
+    cache_dir = os.path.join(config.data.root, "audio_cache")
+    
     train_ds = BinauralDataset(
         dataset_name=config.data.dataset_name,
         split="train",
         target_sample_rate=config.audio.sample_rate,
-        max_items=config.data.max_items
+        max_items=config.data.max_items,
+        cache_dir=cache_dir
     )
     
     val_ds = BinauralDataset(
         dataset_name=config.data.dataset_name,
         split="validation", # "validation" in metadata.csv
         target_sample_rate=config.audio.sample_rate,
-        max_items=config.data.max_items
+        max_items=config.data.max_items,
+        cache_dir=cache_dir
     )
     
     return train_ds, val_ds
