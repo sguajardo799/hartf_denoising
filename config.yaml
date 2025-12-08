@@ -6,7 +6,8 @@ general:
 
 data:
   dataset_name: "sguajardo799/BinauralDenoising2025"
-  max_items: 1000
+  max_items: null # Set to integer to limit dataset size (e.g. 100)
+  download: false # Set to true to download entire dataset to cache
   num_workers: 0
   pin_memory: true
 

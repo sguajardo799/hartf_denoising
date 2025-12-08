@@ -14,6 +14,7 @@ class BinauralDataset(Dataset):
         max_items: int | None = None,
         auth_token: str | None = None,
         cache_dir: str | None = None,
+        download: bool = False,
     ):
         super().__init__()
         self.target_sr = target_sample_rate
@@ -21,62 +22,76 @@ class BinauralDataset(Dataset):
         if self.cache_dir:
             os.makedirs(self.cache_dir, exist_ok=True)
         
-        # Load dataset from Hugging Face
-        # Assuming the dataset has a 'split' column or we filter by it if it's a single split loaded
-        # But usually HF datasets are loaded by split argument if defined in dataset script
-        # The user mentioned a 'split' column in metadata.csv. 
-        # We'll load the full dataset and filter, or load specific split if supported.
-        # For now, let's load 'train' split of the HF dataset object, then filter by the 'split' column if needed.
-        
         print(f"Loading dataset {dataset_name}...")
         
-        # Strategy: Load metadata.csv directly to avoid AudioFolder overhead/errors
-        # We construct the URL for metadata.csv
-        # Assuming main branch
         base_url = f"https://huggingface.co/datasets/{dataset_name}/resolve/main"
         metadata_url = f"{base_url}/metadata.csv"
         
         try:
-            # Load CSV in streaming mode
-            self.dataset = load_dataset("csv", data_files=metadata_url, split="train", streaming=True)
+            # Load CSV. For full download, we don't need streaming if metadata is small.
+            # But let's keep streaming=False to get full list easily.
+            self.dataset = load_dataset("csv", data_files=metadata_url, split="train", streaming=False)
         except Exception as e:
              print(f"Error loading metadata from {metadata_url}: {e}")
-             # Fallback to standard load if CSV fails (maybe it's not public or requires token in a way csv loader doesn't handle?)
-             # Note: load_dataset("csv") might not use the auth_token by default for private repos unless passed?
-             # It accepts use_auth_token (deprecated) or token?
-             # Actually load_dataset("csv", ..., token=token) works.
              print("Falling back to standard load_dataset...")
-             self.dataset = load_dataset(dataset_name, split="train", token=auth_token, streaming=True)
+             self.dataset = load_dataset(dataset_name, split="train", token=auth_token, streaming=False)
 
         # Filter by split
         if split:
-             # We assume "split" column exists in CSV
              self.dataset = self.dataset.filter(lambda x: x["split"] == split)
 
         if max_items is not None:
-            print(f"Materializing {max_items} items from stream...")
-            self.dataset = list(self.dataset.take(max_items))
-        else:
-            # If not max_items, we might want to materialize everything or keep streaming?
-            # For training, map-style is preferred.
-            # But if dataset is huge, we might crash.
-            # For now, let's materialize if max_items is None too, assuming it fits in RAM or user sets max_items.
-            # Or we can keep it streaming but __getitem__ needs to handle it?
-            # But __getitem__ uses idx.
-            # So we MUST materialize to list to support __getitem__(idx).
-            # If the dataset is huge, this code will OOM.
-            # But the user asked for "few data samples" test.
-            # For production, we should probably use standard load_dataset (not streaming) which uses Arrow (mmap) and doesn't OOM.
-            # But standard load failed/was slow.
-            # Let's assume for this task we materialize.
-            print("Materializing full dataset from stream (warning: might be slow/OOM)...")
-            self.dataset = list(self.dataset)
+            print(f"Selecting {max_items} items...")
+            self.dataset = self.dataset.select(range(max_items))
 
         self.base_url = base_url
         self.resampler = None 
+        
+        self.base_url = base_url
+        self.resampler = None 
+        
+        if download and self.cache_dir:
+            self.download_all()
+
+    def download_all(self):
+        print(f"Downloading {len(self.dataset)} items to {self.cache_dir}...")
+        from tqdm.auto import tqdm
+        from concurrent.futures import ThreadPoolExecutor
+        
+        def process_item(item):
+            # Download all audio columns
+            for key in ["hartf_front", "hartf_back", "hrtf_clean"]:
+                source = item[key]
+                if isinstance(source, str):
+                    filename = source.replace("/", "_").replace(":", "_")
+                    dest_path = os.path.join(self.cache_dir, filename)
+                    if not os.path.exists(dest_path):
+                        if source.startswith("http"):
+                            url = source
+                        else:
+                            url = f"{self.base_url}/{source}"
+                        try:
+                            self._download_with_retry(url, dest_path)
+                        except Exception as e:
+                            print(f"Failed to download {url}: {e}")
+
+        # Use threading for faster downloads
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            list(tqdm(executor.map(process_item, self.dataset), total=len(self.dataset)))
+        print("Download complete.")
 
     def __len__(self):
         return len(self.dataset)
+
+    def _process_wav(self, wav, sr):
+        if wav.ndim == 1:
+            wav = wav.unsqueeze(0)
+            
+        if sr != self.target_sr:
+            if self.resampler is None or self.resampler.orig_freq != sr:
+                self.resampler = torchaudio.transforms.Resample(sr, self.target_sr)
+            wav = self.resampler(wav)
+        return wav
 
     def _load_audio(self, source):
         # source is the path from CSV, e.g. "audio/hartf_front/..."
@@ -151,14 +166,7 @@ class BinauralDataset(Dataset):
         else:
             raise ValueError(f"Unknown audio source: {source}")
 
-        if wav.ndim == 1:
-            wav = wav.unsqueeze(0)
-            
-        if sr != self.target_sr:
-            if self.resampler is None or self.resampler.orig_freq != sr:
-                self.resampler = torchaudio.transforms.Resample(sr, self.target_sr)
-            wav = self.resampler(wav)
-        return wav
+        return self._process_wav(wav, sr)
 
     def _download_with_retry(self, url, dest_path):
         import requests
@@ -185,15 +193,6 @@ class BinauralDataset(Dataset):
                 wait_time = backoff_factor * (2 ** i)
                 # print(f"Download failed ({e}), retrying in {wait_time}s...")
                 time.sleep(wait_time)
-
-        if wav.ndim == 1:
-            wav = wav.unsqueeze(0)
-            
-        if sr != self.target_sr:
-            if self.resampler is None or self.resampler.orig_freq != sr:
-                self.resampler = torchaudio.transforms.Resample(sr, self.target_sr)
-            wav = self.resampler(wav)
-        return wav
 
     def __getitem__(self, idx):
         item = self.dataset[idx]
@@ -229,7 +228,8 @@ def get_data_splits(config):
         split="train",
         target_sample_rate=config.audio.sample_rate,
         max_items=config.data.max_items,
-        cache_dir=cache_dir
+        cache_dir=cache_dir,
+        download=config.data.download
     )
     
     val_ds = BinauralDataset(
@@ -237,7 +237,8 @@ def get_data_splits(config):
         split="validation", # "validation" in metadata.csv
         target_sample_rate=config.audio.sample_rate,
         max_items=config.data.max_items,
-        cache_dir=cache_dir
+        cache_dir=cache_dir,
+        download=config.data.download
     )
     
     return train_ds, val_ds

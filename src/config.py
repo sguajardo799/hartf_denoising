@@ -11,13 +11,13 @@ class GeneralConfig:
 
 @dataclass
 class DataConfig:
-    dataset_name: str
-    max_items: int
-    num_workers: int
-    pin_memory: bool
+    dataset_name: str = "sguajardo799/BinauralDenoising2025"
+    max_items: int | None = None
+    num_workers: int = 0
+    pin_memory: bool = True
+    download: bool = False
     # Optional fields for backward compatibility if needed, but better to be clean
     # root: str = ""
-    # download: bool = False
 
 @dataclass
 class AudioConfig:

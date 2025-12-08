@@ -19,6 +19,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, help="Override batch_size")
     parser.add_argument("--learning_rate", type=float, help="Override learning_rate")
     parser.add_argument("--device", type=str, help="Override device (cpu/cuda)")
+    parser.add_argument("--download", action="store_true", help="Download entire dataset to cache")
     return parser.parse_args()
 
 def main():
@@ -40,8 +41,10 @@ def main():
         config.training.batch_size = args.batch_size
     if args.learning_rate is not None:
         config.training.learning_rate = args.learning_rate
-    if args.device is not None:
+    if args.device:
         config.general.device = args.device
+    if args.download:
+        config.data.download = True
 
     print(f"Device: {config.general.device}")
 
