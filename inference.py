@@ -156,7 +156,7 @@ def main():
     parser = argparse.ArgumentParser(description="Inference script for denoising model")
     parser.add_argument("--max_items", type=int, help="Override max_items")
     parser.add_argument("--device", type=str, help="Override device (cpu/cuda)")
-    parser.add_argument("--split", type=str, default="val", help="Dataset split (for val_samples)")
+    parser.add_argument("--split", type=str, default="validation", help="Dataset split (for val_samples)")
     
     subparsers = parser.add_subparsers(dest="mode", required=True)
     

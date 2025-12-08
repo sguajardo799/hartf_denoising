@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config file")
     parser.add_argument("--max_items", type=int, help="Override max_items")
     parser.add_argument("--device", type=str, help="Override device (cpu/cuda)")
-    parser.add_argument("--split", type=str, default="val", help="Dataset split to evaluate on")
+    parser.add_argument("--split", type=str, default="validation", help="Dataset split to evaluate on")
     return parser.parse_args()
 
 def evaluate():

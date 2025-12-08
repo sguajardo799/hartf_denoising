@@ -190,7 +190,7 @@ def get_data_splits(config):
     
     val_ds = BinauralDataset(
         dataset_name=config.data.dataset_name,
-        split="val", # User said "val/test" in split column
+        split="validation", # "validation" in metadata.csv
         target_sample_rate=config.audio.sample_rate,
         max_items=config.data.max_items
     )
