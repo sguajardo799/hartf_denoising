@@ -64,7 +64,7 @@ def run_val_samples(args, config, device):
     # We instantiate BinauralDataset directly to allow split selection
     from src.data import BinauralDataset
     
-    cache_dir = os.path.join(config.data.root, "audio_cache")
+    cache_dir = "data/audio_cache"
     
     val_ds = BinauralDataset(
         dataset_name=config.data.dataset_name,

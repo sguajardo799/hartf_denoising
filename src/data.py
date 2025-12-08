@@ -144,6 +144,22 @@ class BinauralDataset(Dataset):
                     if os.path.exists(tmp_path):
                         os.remove(tmp_path)
                         
+        elif isinstance(source, dict) and "array" in source:
+             # If we fell back to standard load_dataset, it returns dict
+             wav = torch.from_numpy(source["array"]).float()
+             sr = source["sampling_rate"]
+        else:
+            raise ValueError(f"Unknown audio source: {source}")
+
+        if wav.ndim == 1:
+            wav = wav.unsqueeze(0)
+            
+        if sr != self.target_sr:
+            if self.resampler is None or self.resampler.orig_freq != sr:
+                self.resampler = torchaudio.transforms.Resample(sr, self.target_sr)
+            wav = self.resampler(wav)
+        return wav
+
     def _download_with_retry(self, url, dest_path):
         import requests
         import time
@@ -169,13 +185,6 @@ class BinauralDataset(Dataset):
                 wait_time = backoff_factor * (2 ** i)
                 # print(f"Download failed ({e}), retrying in {wait_time}s...")
                 time.sleep(wait_time)
-                
-        elif isinstance(source, dict) and "array" in source:
-             # If we fell back to standard load_dataset, it returns dict
-             wav = torch.from_numpy(source["array"]).float()
-             sr = source["sampling_rate"]
-        else:
-            raise ValueError(f"Unknown audio source: {source}")
 
         if wav.ndim == 1:
             wav = wav.unsqueeze(0)
@@ -213,7 +222,7 @@ def get_data_splits(config):
     # We instantiate the dataset twice, one for train, one for val
     # The class handles filtering by split
     
-    cache_dir = os.path.join(config.data.root, "audio_cache")
+    cache_dir = "data/audio_cache"
     
     train_ds = BinauralDataset(
         dataset_name=config.data.dataset_name,
