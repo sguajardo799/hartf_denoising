@@ -76,7 +76,8 @@ class BinauralDataset(Dataset):
                             print(f"Failed to download {url}: {e}")
 
         # Use threading for faster downloads
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        # Reduced max_workers to 2 to avoid 429 Too Many Requests errors
+        with ThreadPoolExecutor(max_workers=2) as executor:
             list(tqdm(executor.map(process_item, self.dataset), total=len(self.dataset)))
         print("Download complete.")
 
@@ -203,17 +204,20 @@ class BinauralDataset(Dataset):
         wav_front = self._load_audio(item["hartf_front"])
         wav_back = self._load_audio(item["hartf_back"])
         
+        clean = self._load_audio(item["hrtf_clean"]) # (2, T)
+        
+        # Ensure consistent length across all sources
+        min_len = min(wav_front.shape[-1], wav_back.shape[-1], clean.shape[-1])
+        
+        wav_front = wav_front[..., :min_len]
+        wav_back = wav_back[..., :min_len]
+        clean = clean[..., :min_len]
+        
         if wav_front.shape[0] == 1: wav_front = wav_front.repeat(2, 1)
         if wav_back.shape[0] == 1: wav_back = wav_back.repeat(2, 1)
+        if clean.shape[0] == 1: clean = clean.repeat(2, 1)
             
         noisy = torch.cat([wav_front, wav_back], dim=0) # (4, T)
-        
-        clean = self._load_audio(item["hrtf_clean"]) # (2, T)
-        if clean.shape[0] == 1: clean = clean.repeat(2, 1)
-
-        min_len = min(noisy.shape[-1], clean.shape[-1])
-        noisy = noisy[..., :min_len]
-        clean = clean[..., :min_len]
 
         return noisy, clean
 
