@@ -56,3 +56,4 @@ cython_debug/
 pip-log.txt
 
 data/*
+results/*
