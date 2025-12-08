@@ -139,8 +139,8 @@ def evaluate():
             # TorchMetrics audio metrics often expect (B, T).
             # We flatten B and C to treat each channel as an independent sample for metric calculation.
             B, C, T = pred_wav.shape
-            pred_flat = pred_wav.reshape(B * C, T)
-            clean_flat = clean.reshape(B * C, T)
+            pred_flat = pred_wav.reshape(B * C, T).contiguous()
+            clean_flat = clean.reshape(B * C, T).contiguous()
             
             m_stoi = stoi(pred_flat, clean_flat)
             try:
