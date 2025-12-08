@@ -1,5 +1,5 @@
 general:
-  device: "cuda"
+  device: "cpu" #"cuda"
   device_id: 1 # Options: 0, 1
   seed: 42
   results_dir: "results"
@@ -38,5 +38,7 @@ training:
 loss:
   type: "composite" # "mse", "l1", "huber", "composite"
   spectral_type: "l1" # Used if type is composite
-  alpha: 1.0
-  beta: 0.1
+  alpha: 1.0 # Weight for spectral loss
+  beta: 0.1 # Weight for SI-SDR loss
+  gamma: 0.1 # Weight for PMSQE loss
+  delta: 0.1 # Weight for STOI loss

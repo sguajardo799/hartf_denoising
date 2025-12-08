@@ -52,6 +52,8 @@ class LossConfig:
     spectral_type: str = "mse" # Used if type is composite
     alpha: float = 1.0
     beta: float = 0.1
+    gamma: float = 0.1
+    delta: float = 0.1
 
 @dataclass
 class Config:
