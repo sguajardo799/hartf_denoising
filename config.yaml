@@ -8,7 +8,7 @@ data:
   dataset_name: "sguajardo799/BinauralDenoising2025"
   max_items: null # Set to integer to limit dataset size (e.g. 100)
   download: false # Set to true to download entire dataset to cache
-  num_workers: 0
+  num_workers: 4
   pin_memory: true
 
 audio:
@@ -29,7 +29,7 @@ model:
 
 training:
   batch_size: 32 # Increase to 64 or 128 for DGX A100
-  max_epochs: 100
+  max_epochs: 200
   learning_rate: 1.0e-3
   patience: 10
   min_delta: 1.0e-4
@@ -40,5 +40,5 @@ loss:
   spectral_type: "l1" # Used if type is composite
   alpha: 1.0 # Weight for spectral loss
   beta: 0.1 # Weight for SI-SDR loss
-  gamma: 0.1 # Weight for PMSQE loss
+  gamma: 0.0 # Weight for PMSQE loss
   delta: 0.1 # Weight for STOI loss
